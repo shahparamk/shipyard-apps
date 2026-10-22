@@ -1,3 +1,4 @@
+const fs = require('fs');
 const http = require('http');
 const os = require('os');
 const client = require('prom-client');
@@ -13,11 +14,13 @@ const log = (level, msg, extra = {}) =>
   console.log(JSON.stringify({ level, service: 'worker', pod: podName, msg, ...extra }));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-for (const name of ['DATABASE_URL', 'QUEUE_URL']) {
-  if (!process.env[name]) {
-    log('error', `missing required env var ${name}`);
-    process.exit(1);
-  }
+if (!process.env.QUEUE_URL) {
+  log('error', 'missing required env var QUEUE_URL');
+  process.exit(1);
+}
+if (!process.env.DATABASE_URL && !process.env.PGHOST) {
+  log('error', 'set DATABASE_URL or PGHOST/PGUSER/PGPASSWORD/PGDATABASE');
+  process.exit(1);
 }
 
 const queueUrl = process.env.QUEUE_URL;
@@ -27,7 +30,18 @@ const sqs = new SQSClient({
   region: process.env.AWS_REGION || 'us-east-1',
   ...(process.env.SQS_ENDPOINT ? { endpoint: process.env.SQS_ENDPOINT } : {}),
 });
-const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 5 });
+
+// TLS to the database: off locally, verified against the RDS CA bundle in AWS
+function sslConfig() {
+  if ((process.env.DB_SSL || 'disable') === 'disable') return false;
+  const caPath = process.env.DB_SSL_CA || '/app/certs/rds-global-bundle.pem';
+  return { ca: fs.readFileSync(caPath, 'utf8'), rejectUnauthorized: true };
+}
+
+// Use DATABASE_URL if set (local); otherwise pg reads PGHOST/PGUSER/PGPASSWORD/PGDATABASE/PGPORT
+const poolConfig = { max: 5, ssl: sslConfig() };
+if (process.env.DATABASE_URL) poolConfig.connectionString = process.env.DATABASE_URL;
+const pool = new Pool(poolConfig);
 
 // ---------- Metrics ----------
 const register = new client.Registry();

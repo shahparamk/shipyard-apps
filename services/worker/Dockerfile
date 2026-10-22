@@ -13,6 +13,7 @@ RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack 
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 COPY src ./src
+COPY certs ./certs
 USER node
 EXPOSE 9091
 CMD ["node", "src/index.js"]
