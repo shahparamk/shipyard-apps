@@ -15,6 +15,7 @@ RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack 
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 COPY src ./src
+COPY certs ./certs
 # Files stay owned by root (read-only to the app); the process runs as the unprivileged "node" user
 USER node
 EXPOSE 8080

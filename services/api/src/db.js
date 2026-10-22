@@ -1,7 +1,23 @@
+const fs = require('fs');
 const { Pool } = require('pg');
 
+// TLS to the database: off locally, verified against the RDS CA bundle in AWS
+function sslConfig() {
+  if ((process.env.DB_SSL || 'disable') === 'disable') return false;
+  const caPath = process.env.DB_SSL_CA || '/app/certs/rds-global-bundle.pem';
+  return { ca: fs.readFileSync(caPath, 'utf8'), rejectUnauthorized: true };
+}
+
+// Use DATABASE_URL if set (local); otherwise pg reads PGHOST/PGUSER/PGPASSWORD/PGDATABASE/PGPORT
+// (avoids URL-encoding problems with generated passwords)
+function poolConfig(max) {
+  const config = { max, ssl: sslConfig() };
+  if (process.env.DATABASE_URL) config.connectionString = process.env.DATABASE_URL;
+  return config;
+}
+
 function createDb() {
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 10 });
+  const pool = new Pool(poolConfig(10));
 
   return {
     async migrate() {

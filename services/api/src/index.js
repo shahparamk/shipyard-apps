@@ -7,11 +7,13 @@ const log = (level, msg, extra = {}) =>
   console.log(JSON.stringify({ level, service: 'api', msg, ...extra }));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-for (const name of ['DATABASE_URL', 'QUEUE_URL']) {
-  if (!process.env[name]) {
-    log('error', `missing required env var ${name}`);
-    process.exit(1);
-  }
+if (!process.env.QUEUE_URL) {
+  log('error', 'missing required env var QUEUE_URL');
+  process.exit(1);
+}
+if (!process.env.DATABASE_URL && !process.env.PGHOST) {
+  log('error', 'set DATABASE_URL or PGHOST/PGUSER/PGPASSWORD/PGDATABASE');
+  process.exit(1);
 }
 
 async function main() {
