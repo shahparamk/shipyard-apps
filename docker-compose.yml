@@ -1,0 +1,46 @@
+# Local development only. Credentials here are throwaway values, never used in AWS.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: shipyard
+      POSTGRES_PASSWORD: shipyard_local
+      POSTGRES_DB: orders
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shipyard -d orders"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  elasticmq:
+    image: softwaremill/elasticmq-native
+    volumes:
+      - ./local/elasticmq.conf:/opt/elasticmq.conf:ro
+    ports:
+      - "9325:9325" # ElasticMQ web UI to peek at the queue
+
+  api:
+    build: ./services/api
+    environment: &app-env
+      DATABASE_URL: postgres://shipyard:shipyard_local@postgres:5432/orders
+      QUEUE_URL: http://elasticmq:9324/000000000000/orders
+      SQS_ENDPOINT: http://elasticmq:9324
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      APP_VERSION: local
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      elasticmq:
+        condition: service_started
+
+  worker:
+    build: ./services/worker
+    environment:
+      <<: *app-env
+      PROCESSING_MS: "1000"
+    depends_on:
+      - api
