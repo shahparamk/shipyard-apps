@@ -1,0 +1,106 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "services/**"
+      - ".github/workflows/ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "services/**"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  TRIVY_VERSION: "0.75.0" # <-- pinned release, at least 2 weeks old
+
+jobs:
+  test:
+    name: test (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, worker]
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+
+      - run: npm ci
+      - run: npm test --if-present
+
+  build:
+    name: build + scan (${{ matrix.service }})
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, worker]
+    permissions:
+      contents: read
+      id-token: write # only used on main, for the ECR push role
+    env:
+      IMAGE: shipyard/${{ matrix.service }}:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/${{ matrix.service }}
+          load: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      - name: Trivy scan (fail on fixable HIGH/CRITICAL)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            "aquasec/trivy:${TRIVY_VERSION}" image \
+            --no-progress --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+            "$IMAGE"
+
+      - name: Configure AWS credentials
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ECR_PUSH_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          # Tags are immutable: if this SHA was already pushed (e.g. a re-run), skip instead of failing
+          if aws ecr describe-images --repository-name "shipyard/${{ matrix.service }}" \
+               --image-ids imageTag=${{ github.sha }} >/dev/null 2>&1; then
+            echo "Image for ${{ github.sha }} already exists, skipping push"
+            exit 0
+          fi
+          REMOTE="$REGISTRY/$IMAGE"
+          docker tag "$IMAGE" "$REMOTE"
+          docker push "$REMOTE"
+          echo "Pushed \`$REMOTE\`" >> "$GITHUB_STEP_SUMMARY"
