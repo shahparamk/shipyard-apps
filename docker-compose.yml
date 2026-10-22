@@ -16,8 +16,7 @@ services:
     image: softwaremill/elasticmq-native
     volumes:
       - ./local/elasticmq.conf:/opt/elasticmq.conf:ro
-    ports:
-      - "9325:9325" # ElasticMQ web UI to peek at the queue
+    
 
   api:
     build: ./services/api
