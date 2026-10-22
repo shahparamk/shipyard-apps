@@ -18,7 +18,7 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
-  TRIVY_VERSION: "0.76.1" # <-- pinned release, at least 2 weeks old
+  TRIVY_VERSION: "0.75.0" # <-- pinned release, at least 2 weeks old
 
 jobs:
   test:
