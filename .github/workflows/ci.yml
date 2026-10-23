@@ -18,7 +18,7 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
-  TRIVY_VERSION: "0.75.0" # <-- pinned release, at least 2 weeks old
+  TRIVY_VERSION: "0.75.0"
 
 jobs:
   test:
@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [api, worker]
+        service: [api, worker, web]
     defaults:
       run:
         working-directory: services/${{ matrix.service }}
@@ -41,6 +41,7 @@ jobs:
           cache-dependency-path: services/${{ matrix.service }}/package-lock.json
 
       - run: npm ci
+      - run: npm run lint --if-present
       - run: npm test --if-present
 
   build:
@@ -50,7 +51,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [api, worker]
+        service: [api, worker, web]
     permissions:
       contents: read
       id-token: write # only used on main, for the ECR push role
