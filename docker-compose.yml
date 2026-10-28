@@ -41,5 +41,7 @@ services:
     environment:
       <<: *app-env
       PROCESSING_MS: "1000"
+      MAX_MESSAGES: "2"
+      CONCURRENCY: "5"
     depends_on:
       - api

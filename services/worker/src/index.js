@@ -26,6 +26,11 @@ if (!process.env.DATABASE_URL && !process.env.PGHOST) {
 const queueUrl = process.env.QUEUE_URL;
 const processingMs = Number(process.env.PROCESSING_MS || 500);
 
+// How many messages to take per poll (SQS allows 1-10). Smaller = work spreads across pods.
+const maxMessages = Math.min(10, Math.max(1, Number(process.env.MAX_MESSAGES || 10)));
+// How many messages to process at the same time inside this pod. Higher = a batch clears faster.
+const concurrency = Math.max(1, Number(process.env.CONCURRENCY || 1));
+
 const sqs = new SQSClient({
   region: process.env.AWS_REGION || 'us-east-1',
   ...(process.env.SQS_ENDPOINT ? { endpoint: process.env.SQS_ENDPOINT } : {}),
@@ -38,8 +43,9 @@ function sslConfig() {
   return { ca: fs.readFileSync(caPath, 'utf8'), rejectUnauthorized: true };
 }
 
-// Use DATABASE_URL if set (local); otherwise pg reads PGHOST/PGUSER/PGPASSWORD/PGDATABASE/PGPORT
-const poolConfig = { max: 5, ssl: sslConfig() };
+// Use DATABASE_URL if set (local); otherwise pg reads PGHOST/PGUSER/PGPASSWORD/PGDATABASE/PGPORT.
+// Enough DB connections for every message we process in parallel.
+const poolConfig = { max: Math.max(5, concurrency), ssl: sslConfig() };
 if (process.env.DATABASE_URL) poolConfig.connectionString = process.env.DATABASE_URL;
 const pool = new Pool(poolConfig);
 
@@ -61,30 +67,52 @@ const duration = new client.Histogram({
   registers: [register],
 });
 
+const inFlight = new client.Gauge({
+  name: 'orders_in_flight',
+  help: 'Orders this worker is processing right now',
+  registers: [register],
+});
+
 // ---------- Processing ----------
 async function handle(message) {
   const end = duration.startTimer();
-  const { orderId } = JSON.parse(message.Body);
+  inFlight.inc();
+  try {
+    const { orderId } = JSON.parse(message.Body);
 
-  await sleep(processingMs); // simulated work
+    await sleep(processingMs); // simulated work
 
-  // Idempotent: SQS is at-least-once, so only update orders still "pending"
-  const { rowCount } = await pool.query(
-    `UPDATE orders
-        SET status = 'processed', processed_at = now(), processed_by = $2
-      WHERE id = $1 AND status = 'pending'`,
-    [orderId, podName]
-  );
+    // Idempotent: SQS is at-least-once, so only update orders still "pending"
+    const { rowCount } = await pool.query(
+      `UPDATE orders
+          SET status = 'processed', processed_at = now(), processed_by = $2
+        WHERE id = $1 AND status = 'pending'`,
+      [orderId, podName]
+    );
 
-  // Delete only after the DB update succeeded; otherwise the message reappears and is retried
-  await sqs.send(
-    new DeleteMessageCommand({ QueueUrl: queueUrl, ReceiptHandle: message.ReceiptHandle })
-  );
+    // Delete only after the DB update succeeded; otherwise the message reappears and is retried
+    await sqs.send(
+      new DeleteMessageCommand({ QueueUrl: queueUrl, ReceiptHandle: message.ReceiptHandle })
+    );
 
-  end();
-  const result = rowCount === 1 ? 'processed' : 'duplicate';
-  processed.inc({ result });
-  log('info', result === 'processed' ? 'order processed' : 'duplicate message ignored', { orderId });
+    const result = rowCount === 1 ? 'processed' : 'duplicate';
+    processed.inc({ result });
+    log('info', result === 'processed' ? 'order processed' : 'duplicate message ignored', { orderId });
+  } finally {
+    inFlight.dec();
+    end();
+  }
+}
+
+// Process items with at most `limit` running at once
+async function runWithConcurrency(items, limit, fn) {
+  const queue = [...items];
+  const runners = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+    while (queue.length > 0) {
+      await fn(queue.shift());
+    }
+  });
+  await Promise.all(runners);
 }
 
 let stopping = false;
@@ -96,19 +124,19 @@ async function loop() {
       const { Messages = [] } = await sqs.send(
         new ReceiveMessageCommand({
           QueueUrl: queueUrl,
-          MaxNumberOfMessages: 10,
+          MaxNumberOfMessages: maxMessages,
           WaitTimeSeconds: 20,
           VisibilityTimeout: 30,
         })
       );
-      for (const message of Messages) {
+      await runWithConcurrency(Messages, concurrency, async (message) => {
         try {
           await handle(message);
         } catch (err) {
           processed.inc({ result: 'failed' });
           log('error', 'processing failed; message will be retried', { error: err.message });
         }
-      }
+      });
     } catch (err) {
       log('error', 'receive failed', { error: err.message });
       await sleep(5000);
@@ -141,7 +169,7 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
 async function main() {
-  log('info', 'worker starting', { queueUrl, processingMs });
+  log('info', 'worker starting', { queueUrl, processingMs, maxMessages, concurrency });
   await loop();
   await pool.end();
   server.close();
