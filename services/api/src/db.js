@@ -51,6 +51,27 @@ function createDb() {
       return rows;
     },
 
+    // Live counts for the dashboard (the order list is capped at 50 rows, so it can't count)
+    async stats() {
+      const { rows } = await pool.query(`
+        SELECT
+          count(*)                                                        AS total,
+          count(*) FILTER (WHERE status = 'pending')                      AS pending,
+          count(*) FILTER (WHERE processed_at > now() - interval '60 seconds') AS processed_last_minute,
+          percentile_cont(0.95) WITHIN GROUP (
+            ORDER BY extract(epoch FROM processed_at - created_at) * 1000
+          ) FILTER (WHERE processed_at > now() - interval '5 minutes')    AS p95_ms
+        FROM orders
+      `);
+      const r = rows[0];
+      return {
+        total: Number(r.total),
+        pending: Number(r.pending),
+        processedLastMinute: Number(r.processed_last_minute),
+        p95Ms: r.p95_ms === null ? null : Math.round(Number(r.p95_ms)),
+      };
+    },
+
     async getOrder(id) {
       const { rows } = await pool.query('SELECT * FROM orders WHERE id = $1', [id]);
       return rows[0] || null;
