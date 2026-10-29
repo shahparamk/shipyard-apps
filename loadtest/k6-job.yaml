@@ -1,0 +1,51 @@
+# Run manually on test day (not managed by Argo):
+#   kubectl create configmap k6-script -n shipyard --from-file=orders.js=loadtest/orders.js --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl apply -f loadtest/k6-job.yaml
+#   kubectl logs -n shipyard job/k6-orders -f
+# To run again: kubectl delete job k6-orders -n shipyard, then apply again.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6-orders
+  namespace: shipyard
+  labels:
+    app.kubernetes.io/name: k6-orders
+spec:
+  backoffLimit: 0 # a failed load test should not silently retry
+  ttlSecondsAfterFinished: 1800 # clean up 30 minutes after finishing
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: k6-orders
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false # k6 never talks to the Kubernetes API
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 12345 # the k6 image's non-root user
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: k6
+          image: grafana/k6:2.3.0 # pinned (2-week rule)
+          args: ["run", "/scripts/orders.js"]
+          env:
+            - name: BASE_URL
+              value: http://orders-api.shipyard.svc.cluster.local
+          resources:
+            requests:
+              cpu: 250m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+      volumes:
+        - name: scripts
+          configMap:
+            name: k6-script
