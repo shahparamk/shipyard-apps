@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light;
   --bg: #f4f6fa;
   --bg-glow: #e6edff;
   --card: #ffffff;
@@ -18,6 +19,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    color-scheme: dark;
     --bg: #0b1017;
     --bg-glow: #13203a;
     --card: #121a25;

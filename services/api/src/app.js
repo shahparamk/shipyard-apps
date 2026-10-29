@@ -1,8 +1,9 @@
 const express = require('express');
 const client = require('prom-client');
+const { createRateLimiter } = require('./rateLimit');
 
 // Dependencies are injected so tests can use fakes instead of a real DB/queue
-function createApp({ db, queue, info }) {
+function createApp({ db, queue, info, rateLimit = {} }) {
   const app = express();
   app.use(express.json({ limit: '10kb' }));
 
@@ -22,6 +23,20 @@ function createApp({ db, queue, info }) {
     name: 'orders_created_total',
     help: 'Orders accepted by the API',
     registers: [register],
+  });
+
+  const ordersRateLimited = new client.Counter({
+    name: 'orders_rate_limited_total',
+    help: 'Order requests rejected by the per-client rate limiter',
+    registers: [register],
+  });
+
+  // Public site: cap how fast one client can create orders (see rateLimit.js)
+  const limitOrders = createRateLimiter({
+    max: Number(process.env.RATE_LIMIT_MAX || 60),
+    windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 10000),
+    ...rateLimit,
+    onLimited: () => ordersRateLimited.inc(),
   });
 
   app.use((req, res, next) => {
@@ -56,7 +71,7 @@ function createApp({ db, queue, info }) {
   app.get('/api/info', (req, res) => res.json(info));
 
   // ---------- Orders ----------
-  app.post('/api/orders', async (req, res) => {
+  app.post('/api/orders', limitOrders, async (req, res) => {
     const { item, quantity } = req.body || {};
 
     if (typeof item !== 'string' || item.trim() === '' || item.length > 100) {
@@ -77,6 +92,11 @@ function createApp({ db, queue, info }) {
 
   app.get('/api/orders', async (req, res) => {
     res.json(await db.listOrders(50));
+  });
+
+  // Live counts for the dashboard header (one cheap aggregate query)
+  app.get('/api/stats', async (req, res) => {
+    res.json(await db.stats());
   });
 
   app.get('/api/orders/:id', async (req, res) => {
