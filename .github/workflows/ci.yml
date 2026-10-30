@@ -1,18 +1,16 @@
 name: ci
 
 on:
+  # Every PR runs the checks, so required checks always report (docs-only PRs too)
   pull_request:
     branches: [main]
-    paths:
-      - "services/**"
-      - ".github/workflows/ci.yml"
+  # Building and pushing images only happens when service code changes
   push:
     branches: [main]
     paths:
       - "services/**"
       - ".github/workflows/ci.yml"
   workflow_dispatch:
-
 permissions:
   contents: read
 
