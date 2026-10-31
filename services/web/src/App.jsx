@@ -74,8 +74,8 @@ const COPY = {
       latency: ['Time to finish', '95% done within'],
       throughput: ['Finished per minute', 'last 60 seconds'],
     },
-    apiPods: (n) => `${n} desk${n === 1 ? '' : 's'} open`,
-    workerPods: (n) => `${n} working`,
+    apiPods: (n) => `${n} desk${n === 1 ? '' : 's'} answering`,
+    workerPods: (n) => `${n} cooking right now`,
     queueText: (n) => `${n} waiting`,
     dbText: (n) => `${n.toLocaleString()} saved`,
     legendIn: 'new order → desk → ticket rail',
@@ -102,8 +102,8 @@ const COPY = {
       latency: ['p95 order time', 'placed → processed, last 5 min'],
       throughput: ['Throughput', 'processed, last 60 seconds'],
     },
-    apiPods: (n) => `${n} active pod${n === 1 ? '' : 's'} · HPA`,
-    workerPods: (n) => `${n} active pod${n === 1 ? '' : 's'} · KEDA`,
+    apiPods: (n) => `${n} pod${n === 1 ? '' : 's'} answered recently`,
+    workerPods: (n) => `${n} pod${n === 1 ? '' : 's'} busy recently`,
     queueText: (n) => `${n} messages`,
     dbText: (n) => `${n.toLocaleString()} rows`,
     legendIn: 'new order → API → queue',
@@ -221,7 +221,9 @@ const NODES = [
 const LINKS = { in: [0, 1], out: [2, 3] }
 
 function Pipeline({ particles, pending, total, labels, copy, activeApi, activeWorkers, busyWorkers }) {
-  const badges = { queue: pending, worker: activeWorkers.length, db: total }
+  // Badges show exact counts only (queue size, rows saved). Pod dots show pods SEEN working
+  // recently, which is not the same as how many replicas KEDA/HPA are running.
+  const badges = { queue: pending, db: total }
   const below = {
     api: (
       <>

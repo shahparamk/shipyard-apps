@@ -63,7 +63,8 @@ const processed = new client.Counter({
 const duration = new client.Histogram({
   name: 'order_processing_duration_seconds',
   help: 'Time to process one order',
-  buckets: [0.1, 0.5, 1, 2, 5, 10],
+    // Finer buckets around the ~0.5-0.6 s processing time, so p95 isn't estimated across a 0.5-1 s gap
+  buckets: [0.1, 0.25, 0.5, 0.6, 0.75, 1, 2, 5, 10],
   registers: [register],
 });
 
