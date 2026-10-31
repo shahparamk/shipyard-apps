@@ -86,6 +86,8 @@ function createApp({ db, queue, info, rateLimit = {} }) {
     const order = await db.createOrder(item.trim(), quantity);
     await queue.sendOrder(order.id);
     ordersCreated.inc();
+    // Structured log with orderId, so one order's whole journey is searchable in Loki
+    console.log(JSON.stringify({ level: 'info', service: 'api', pod: info.pod, msg: 'order accepted', orderId: order.id }));
 
     res.status(201).json(order);
   });

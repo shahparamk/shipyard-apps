@@ -219,7 +219,8 @@ tr.row-done { background: color-mix(in srgb, var(--ok) 8%, transparent); }
   .page { padding: 14px 12px 32px; }
   .header h1 { font-size: 1.4rem; }
   .intro { flex-direction: column; align-items: flex-start; }
-  .controls input { flex: 1 1 140px; width: auto; }
+  .controls input { flex: 1 1 100%; width: auto; }
+  .controls input.qty { flex: 0 0 76px; width: 76px; text-align: center; }
   .pipeline { flex-direction: column; align-items: center; padding-top: 12px; }
   .pipe-segment, .pipe-segment:last-child { flex-direction: column; align-items: center; flex: none; width: 100%; }
   .pipe-node { width: min(260px, 100%); }
